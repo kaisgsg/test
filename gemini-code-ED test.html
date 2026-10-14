@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Real-Time Nurse Bed Management & Booking System</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  
+  <!-- Firebase & Real-Time Sync Scripts -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-analytics.js";
+    import { getFirestore, collection, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    // Your Firebase Configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyBGlkNLXvtQONaVqiA_9GpJWLb9AvFcQG4",
+      authDomain: "main-ed.firebaseapp.com",
+      databaseURL: "https://main-ed-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "main-ed",
+      storageBucket: "main-ed.firebasestorage.app",
+      messagingSenderId: "6134224866",
+      appId: "1:6134224866:web:47a0a9d3c8704867268bbb",
+      measurementId: "G-J7TT96PL66"
+    };
+
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const analytics = getAnalytics(app);
+    const db = getFirestore(app);
+
+    const AREAS = [
+      { id: 'OBS', name: 'Observation Area', prefix: 'OBS', count: 20 },
+      { id: 'SSU', name: 'Short Stay Unit (SSU)', prefix: 'SSU', count: 20 },
+      { id: 'CEN', name: 'Central Space', prefix: 'CEN', count: 20 }
+    ];
+
+    window.bedsData = {};
+
+    window.initRealtimeSync = function() {
+      onSnapshot(collection(db, "beds"), (snapshot) => {
+        if (snapshot.empty) {
+          initializeDefaultBedsInDB();
+        } else {
+          window.bedsData = {};
+          snapshot.forEach((docSnap) => {
+            window.bedsData[docSnap.id] = docSnap.data();
+          });
+          if (typeof window.renderBeds === 'function') {
+            window.renderBeds();
+          }
+        }
+      }, (error) => {
+        console.error("Firestore sync error: ", error);
+      });
+    };
+
+    async function initializeDefaultBedsInDB() {
+      const batchPromises = [];
+      AREAS.forEach(area => {
+        for (let i = 1; i <= area.count; i++) {
+          const bedId = `${area.prefix}-${String(i).padStart(2, '0')}`;
+          let status = 'empty';
+          let patient = '';
+          let nurse = '';
+          let time = '';
+          let notes = '';
+
+          if (i === 1 || i === 3) {
+            status = 'occupied';
+            patient = `Patient ${bedId}`;
+            nurse = 'Nurse Sarah';
+            time = 'In: 09:00 AM';
+          } else if (i === 2) {
+            status = 'booked';
+            patient = `Incoming Patient`;
+            nurse = 'Nurse James';
+            time = 'ETA: 11:30 AM';
+          } else if (i === 5) {
+            status = 'cleaning';
+            notes = 'Sanitization in progress';
+          }
+
+          const bedObj = {
+            id: bedId,
+            areaId: area.id,
+            areaName: area.name,
+            number: i,
+            status,
+            patient,
+            nurse,
+            time,
+            notes,
+            lastUpdated: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          };
+          batchPromises.push(setDoc(doc(db, "beds", bedId), bedObj));
+        }
+      });
+      await Promise.all(batchPromises);
+    }
+
+    window.updateBedInCloud = async function(bedId, updatedData) {
+      try {
+        await setDoc(doc(db, "beds", bedId), updatedData, { merge: true });
+      } catch (e) {
+        console.error("Error updating bed: ", e);
+        alert("Failed to update bed status in cloud.");
+      }
+    };
+
+    window.resetCloudBeds = async function() {
+      if (confirm('Are you sure you want to reset all 60 beds to default in the cloud?')) {
+        await initializeDefaultBedsInDB();
+      }
+    };
+
+    window.addEventListener('DOMContentLoaded', () => {
+      window.initRealtimeSync();
+    });
+  </script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: { brand: '#0e7490', brandDark: '#155e75' }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans min-h-screen pb-12">
+
+  <!-- Header -->
+  <header class="bg-gradient-to-r from-teal-800 to-cyan-900 text-white shadow-md sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center space-x-3">
+        <div class="bg-white/10 p-2.5 rounded-xl backdrop-blur-sm">
+          <i class="fa-solid font-bold fa-hospital-user text-2xl text-teal-300"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold tracking-wide">Care Unit Bed Management</h1>
+          <p class="text-xs text-teal-200">Real-Time Cloud Synced Live Tracker</p>
+        </div>
+      </div>
+
+      <div class="flex items-center space-x-3">
+        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-200 border border-emerald-400/30">
+          <span class="w-2 h-2 mr-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Cloud Live Sync Active
+        </span>
+        <button onclick="resetCloudBeds()" class="bg-white/10 hover:bg-white/20 text-xs px-3 py-1.5 rounded-lg border border-white/20 transition">
+          <i class="fa-solid fa-rotate-left mr-1"></i> Reset Cloud Data
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 mt-6 space-y-6">
+
+    <!-- Overview Metrics Summary Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+        <div>
+          <p class="text-xs text-slate-500 uppercase font-bold tracking-wider">Total Beds</p>
+          <p class="text-2xl font-black text-slate-800 mt-1" id="count-total">60</p>
+        </div>
+        <div class="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center text-slate-600">
+          <i class="fa-solid fa-bed text-lg"></i>
+        </div>
+      </div>
+
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+        <div>
+          <p class="text-xs text-emerald-600 uppercase font-bold tracking-wider">Empty</p>
+          <p class="text-2xl font-black text-emerald-600 mt-1" id="count-empty">0</p>
+        </div>
+        <div class="w-10 h-10 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600">
+          <i class="fa-solid fa-circle-check text-lg"></i>
+        </div>
+      </div>
+
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+        <div>
+          <p class="text-xs text-amber-600 uppercase font-bold tracking-wider">Booked</p>
+          <p class="text-2xl font-black text-amber-600 mt-1" id="count-booked">0</p>
+        </div>
+        <div class="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600">
+          <i class="fa-solid fa-calendar-check text-lg"></i>
+        </div>
+      </div>
+
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+        <div>
+          <p class="text-xs text-rose-600 uppercase font-bold tracking-wider">Occupied</p>
+          <p class="text-2xl font-black text-rose-600 mt-1" id="count-occupied">0</p>
+        </div>
+        <div class="w-10 h-10 rounded-lg bg-rose-50 flex items-center justify-center text-rose-600">
+          <i class="fa-solid fa-user-nurse text-lg"></i>
+        </div>
+      </div>
+
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between col-span-2 md:col-span-1">
+        <div>
+          <p class="text-xs text-indigo-600 uppercase font-bold tracking-wider">Cleaning</p>
+          <p class="text-2xl font-black text-indigo-600 mt-1" id="count-cleaning">0</p>
+        </div>
+        <div class="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600">
+          <i class="fa-solid fa-broom text-lg"></i>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filter & Search Toolbar -->
+    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 justify-between items-center">
+      <div class="flex flex-wrap items-center gap-3 text-xs font-semibold">
+        <span class="text-slate-400">Legend:</span>
+        <span class="inline-flex items-center px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 mr-1.5"></span> Empty
+        </span>
+        <span class="inline-flex items-center px-2 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200">
+          <span class="w-2 h-2 rounded-full bg-amber-500 mr-1.5"></span> Booked
+        </span>
+        <span class="inline-flex items-center px-2 py-1 rounded bg-rose-50 text-rose-700 border border-rose-200">
+          <span class="w-2 h-2 rounded-full bg-rose-500 mr-1.5"></span> Occupied
+        </span>
+        <span class="inline-flex items-center px-2 py-1 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+          <span class="w-2 h-2 rounded-full bg-indigo-500 mr-1.5"></span> Cleaning
+        </span>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+        <select id="filter-status" onchange="renderBeds()" class="text-xs bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-teal-500">
+          <option value="ALL">All Statuses</option>
+          <option value="empty">Empty Only</option>
+          <option value="booked">Booked Only</option>
+          <option value="occupied">Occupied Only</option>
+          <option value="cleaning">Cleaning Only</option>
+        </select>
+
+        <div class="relative flex-1 sm:w-64">
+          <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-xs"></i>
+          <input type="text" id="search-input" oninput="renderBeds()" placeholder="Search Patient / Bed ID..." class="w-full text-xs pl-8 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-teal-500" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Bed Grid Sections by Area -->
+    <div id="areas-container" class="space-y-8"></div>
+
+  </main>
+
+  <!-- Modal for Bed Booking & Status Update -->
+  <div id="bed-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-100">
+      <div class="bg-gradient-to-r from-teal-800 to-cyan-900 text-white p-5 flex justify-between items-center">
+        <div>
+          <h3 class="font-bold text-lg" id="modal-title">Bed Details</h3>
+          <p class="text-xs text-teal-200" id="modal-subtitle">Area Location</p>
+        </div>
+        <button onclick="closeModal()" class="text-teal-200 hover:text-white text-xl font-bold p-1">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <form id="bed-form" onsubmit="saveBedDetails(event)" class="p-5 space-y-4">
+        <input type="hidden" id="modal-bed-id" />
+
+        <div>
+          <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Bed Status</label>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="cursor-pointer">
+              <input type="radio" name="status" value="empty" class="peer sr-only" />
+              <div class="p-2.5 text-center rounded-lg border border-slate-200 text-xs font-bold text-slate-700 peer-checked:bg-emerald-500 peer-checked:text-white peer-checked:border-emerald-500 hover:bg-slate-50 transition">
+                🟢 Empty
+              </div>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="status" value="booked" class="peer sr-only" />
+              <div class="p-2.5 text-center rounded-lg border border-slate-200 text-xs font-bold text-slate-700 peer-checked:bg-amber-500 peer-checked:text-white peer-checked:border-amber-500 hover:bg-slate-50 transition">
+                🟡 Booked
+              </div>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="status" value="occupied" class="peer sr-only" />
+              <div class="p-2.5 text-center rounded-lg border border-slate-200 text-xs font-bold text-slate-700 peer-checked:bg-rose-500 peer-checked:text-white peer-checked:border-rose-500 hover:bg-slate-50 transition">
+                🔴 Occupied
+              </div>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="status" value="cleaning" class="peer sr-only" />
+              <div class="p-2.5 text-center rounded-lg border border-slate-200 text-xs font-bold text-slate-700 peer-checked:bg-indigo-500 peer-checked:text-white peer-checked:border-indigo-500 hover:bg-slate-50 transition">
+                🧹 Cleaning
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Patient Name / NRIC</label>
+          <input type="text" id="modal-patient" placeholder="e.g. John Doe (Optional)" class="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-teal-500" />
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Assigned Nurse</label>
+            <input type="text" id="modal-nurse" placeholder="Staff Nurse" class="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-teal-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Est. Discharge/ETA</label>
+            <input type="text" id="modal-time" placeholder="e.g. 14:30 Today" class="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-teal-500" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Clinical / Handling Notes</label>
+          <textarea id="modal-notes" rows="2" placeholder="e.g. Isolation required..." class="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-teal-500"></textarea>
+        </div>
+
+        <div class="pt-3 flex justify-end space-x-2 border-t border-slate-100">
+          <button type="button" onclick="closeModal()" class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition">
+            Cancel
+          </button>
+          <button type="submit" class="px-5 py-2 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg shadow-sm transition">
+            Save Status
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- UI Render Scripts -->
+  <script>
+    const AREAS = [
+      { id: 'OBS', name: 'Observation Area', prefix: 'OBS', count: 20 },
+      { id: 'SSU', name: 'Short Stay Unit (SSU)', prefix: 'SSU', count: 20 },
+      { id: 'CEN', name: 'Central Space', prefix: 'CEN', count: 20 }
+    ];
+
+    const STATUS_CONFIG = {
+      empty: {
+        label: 'Empty',
+        badge: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+        card: 'bg-white border-emerald-200 hover:border-emerald-400 hover:shadow-md',
+        icon: 'fa-bed-pulse text-emerald-500'
+      },
+      booked: {
+        label: 'Booked',
+        badge: 'bg-amber-100 text-amber-800 border-amber-300',
+        card: 'bg-amber-50/50 border-amber-200 hover:border-amber-400 hover:shadow-md',
+        icon: 'fa-calendar-check text-amber-600'
+      },
+      occupied: {
+        label: 'Occupied',
+        badge: 'bg-rose-100 text-rose-800 border-rose-300',
+        card: 'bg-rose-50/50 border-rose-200 hover:border-rose-400 hover:shadow-md',
+        icon: 'fa-hospital-user text-rose-600'
+      },
+      cleaning: {
+        label: 'Cleaning',
+        badge: 'bg-indigo-100 text-indigo-800 border-indigo-300',
+        card: 'bg-indigo-50/50 border-indigo-200 hover:border-indigo-400 hover:shadow-md',
+        icon: 'fa-broom text-indigo-600'
+      }
+    };
+
+    window.renderBeds = function() {
+      const container = document.getElementById('areas-container');
+      if (!container) return;
+      container.innerHTML = '';
+
+      const filterStatus = document.getElementById('filter-status').value;
+      const searchKeyword = document.getElementById('search-input').value.toLowerCase().trim();
+
+      AREAS.forEach(area => {
+        const areaBeds = Object.values(window.bedsData || {}).filter(bed => {
+          if (bed.areaId !== area.id) return false;
+          if (filterStatus !== 'ALL' && bed.status !== filterStatus) return false;
+          if (searchKeyword) {
+            const matchesId = bed.id.toLowerCase().includes(searchKeyword);
+            const matchesPatient = (bed.patient || '').toLowerCase().includes(searchKeyword);
+            const matchesNurse = (bed.nurse || '').toLowerCase().includes(searchKeyword);
+            if (!matchesId && !matchesPatient && !matchesNurse) return false;
+          }
+          return true;
+        });
+
+        const areaSection = document.createElement('section');
+        areaSection.className = 'bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden';
+
+        areaSection.innerHTML = `
+          <div class="bg-slate-50 border-b border-slate-200 px-6 py-4 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center space-x-3">
+              <span class="w-3 h-3 rounded-full bg-teal-600"></span>
+              <h2 class="text-lg font-bold text-slate-800">${area.name}</h2>
+              <span class="text-xs bg-slate-200 text-slate-700 px-2.5 py-0.5 rounded-full font-semibold">
+                ${areaBeds.length} / ${area.count} Beds
+              </span>
+            </div>
+            <div class="text-xs text-slate-500 font-medium">
+              Area Code: <span class="font-mono font-bold text-slate-700">${area.prefix}</span>
+            </div>
+          </div>
+          <div class="p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            ${areaBeds.map(bed => createBedCardHTML(bed)).join('')}
+          </div>
+        `;
+
+        container.appendChild(areaSection);
+      });
+
+      updateCounts();
+    }
+
+    function createBedCardHTML(bed) {
+      const cfg = STATUS_CONFIG[bed.status] || STATUS_CONFIG.empty;
+      return `
+        <div onclick="openBedModal('${bed.id}')" 
+             class="relative cursor-pointer rounded-xl border p-3.5 transition-all duration-200 flex flex-col justify-between h-36 ${cfg.card}">
+          
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-1.5">
+              <i class="fa-solid ${cfg.icon} text-sm"></i>
+              <span class="font-black text-sm text-slate-800 tracking-tight">${bed.id}</span>
+            </div>
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full border ${cfg.badge}">
+              ${cfg.label}
+            </span>
+          </div>
+
+          <div class="my-1 space-y-0.5">
+            ${bed.patient ? `
+              <p class="text-xs font-bold text-slate-800 truncate" title="${bed.patient}">
+                <i class="fa-solid fa-user text-[10px] text-slate-400 mr-1"></i>${bed.patient}
+              </p>
+            ` : `
+              <p class="text-xs text-slate-400 italic">No patient assigned</p>
+            `}
+
+            ${bed.time ? `
+              <p class="text-[11px] text-slate-500 truncate">
+                <i class="fa-regular fa-clock text-[10px] mr-1"></i>${bed.time}
+              </p>
+            ` : ''}
+          </div>
+
+          <div class="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px] text-slate-500">
+            <span class="truncate">${bed.nurse ? '👩‍⚕️ ' + bed.nurse : 'Tap to update'}</span>
+            <span class="text-[9px] text-slate-400">${bed.lastUpdated || ''}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    function updateCounts() {
+      let counts = { empty: 0, booked: 0, occupied: 0, cleaning: 0, total: 0 };
+      Object.values(window.bedsData || {}).forEach(bed => {
+        counts[bed.status] = (counts[bed.status] || 0) + 1;
+        counts.total++;
+      });
+
+      document.getElementById('count-total').innerText = counts.total;
+      document.getElementById('count-empty').innerText = counts.empty;
+      document.getElementById('count-booked').innerText = counts.booked;
+      document.getElementById('count-occupied').innerText = counts.occupied;
+      document.getElementById('count-cleaning').innerText = counts.cleaning;
+    }
+
+    window.openBedModal = function(bedId) {
+      const bed = window.bedsData[bedId];
+      if (!bed) return;
+
+      document.getElementById('modal-bed-id').value = bed.id;
+      document.getElementById('modal-title').innerText = `Bed ${bed.id}`;
+      document.getElementById('modal-subtitle').innerText = `${bed.areaName}`;
+
+      const radios = document.getElementsByName('status');
+      radios.forEach(radio => {
+        radio.checked = (radio.value === bed.status);
+      });
+
+      document.getElementById('modal-patient').value = bed.patient || '';
+      document.getElementById('modal-nurse').value = bed.nurse || '';
+      document.getElementById('modal-time').value = bed.time || '';
+      document.getElementById('modal-notes').value = bed.notes || '';
+
+      document.getElementById('bed-modal').classList.remove('hidden');
+    }
+
+    window.closeModal = function() {
+      document.getElementById('bed-modal').classList.add('hidden');
+    }
+
+    window.saveBedDetails = function(e) {
+      e.preventDefault();
+      const bedId = document.getElementById('modal-bed-id').value;
+      const selectedStatus = document.querySelector('input[name="status"]:checked').value;
+
+      if (window.bedsData[bedId]) {
+        const existing = window.bedsData[bedId];
+        const updatedBed = {
+          ...existing,
+          status: selectedStatus,
+          patient: document.getElementById('modal-patient').value.trim(),
+          nurse: document.getElementById('modal-nurse').value.trim(),
+          time: document.getElementById('modal-time').value.trim(),
+          notes: document.getElementById('modal-notes').value.trim(),
+          lastUpdated: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+
+        window.updateBedInCloud(bedId, updatedBed);
+        closeModal();
+      }
+    }
+  </script>
+</body>
+</html>
